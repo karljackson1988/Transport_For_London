@@ -1,0 +1,40 @@
+name: TfL Arrivals Snapshot (15 min offset)
+
+on:
+  schedule:
+    - cron: "1,16,31,46 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  arrivals:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run arrivals snapshot script
+        env:
+          TFL_API_KEY: ${{ secrets.TFL_API_KEY }}
+        run: |
+          python scripts/snapshot_tfl_arrivals.py
+
+      - name: Commit and push data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/arrivals/
+          git commit -m "Add TfL arrivals snapshot" || echo "No changes to commit"
+          git push
