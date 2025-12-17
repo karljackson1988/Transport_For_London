@@ -1,73 +1,42 @@
 import os
+import time
+import random
 import requests
 import pandas as pd
 from datetime import datetime, timezone
 from typing import List, Dict, Any
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 BASE_URL = "https://api.tfl.gov.uk"
 MODES = "tube,dlr,overground,elizabeth-line,tram"
 TIMEOUT_SECS = 30
-BATCH_SIZE = 20  # avoids overly long URLs
 
 
-def chunk(lst: List[str], size: int) -> List[List[str]]:
-    return [lst[i:i + size] for i in range(0, len(lst), size)]
+def make_session() -> requests.Session:
+    s = requests.Session()
+    retry = Retry(
+        total=6,
+        backoff_factor=1.5,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+    )
+    s.mount("https://", HTTPAdapter(max_retries=retry))
+    return s
 
 
-def get_lines_by_modes(headers: Dict[str, str], modes: str) -> List[Dict[str, Any]]:
+def get_lines_by_modes(session: requests.Session, headers: Dict[str, str], modes: str) -> List[Dict[str, Any]]:
     url = f"{BASE_URL}/Line/Mode/{modes}"
-    r = requests.get(url, headers=headers, timeout=TIMEOUT_SECS)
+    r = session.get(url, headers=headers, timeout=TIMEOUT_SECS)
     r.raise_for_status()
     return r.json()
 
 
-def get_status_for_line_ids(headers: Dict[str, str], line_ids: List[str]) -> List[Dict[str, Any]]:
-    ids_csv = ",".join(line_ids)
-    url = f"{BASE_URL}/Line/{ids_csv}/Status"
-    r = requests.get(url, headers=headers, timeout=TIMEOUT_SECS)
+def get_arrivals_for_line(session: requests.Session, headers: Dict[str, str], line_id: str) -> List[Dict[str, Any]]:
+    url = f"{BASE_URL}/Line/{line_id}/Arrivals"
+    r = session.get(url, headers=headers, timeout=TIMEOUT_SECS)
     r.raise_for_status()
     return r.json()
-
-
-def flatten_statuses(status_payload: List[Dict[str, Any]], snapshot_time: str) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    for line in status_payload:
-        line_id = line.get("id")
-        line_name = line.get("name")
-        mode_name = line.get("modeName")
-
-        statuses = line.get("lineStatuses") or []
-        if not statuses:
-            rows.append({
-                "snapshot_utc": snapshot_time,
-                "line_id": line_id,
-                "line_name": line_name,
-                "mode_name": mode_name,
-                "statusSeverity": None,
-                "statusSeverityDescription": None,
-                "reason": None,
-                "valid_from_utc": None,
-                "valid_to_utc": None,
-                "isNow": None
-            })
-            continue
-
-        for st in statuses:
-            validity_periods = st.get("validityPeriods") or [None]
-            for vp in validity_periods:
-                rows.append({
-                    "snapshot_utc": snapshot_time,
-                    "line_id": line_id,
-                    "line_name": line_name,
-                    "mode_name": mode_name,
-                    "statusSeverity": st.get("statusSeverity"),
-                    "statusSeverityDescription": st.get("statusSeverityDescription"),
-                    "reason": st.get("reason"),
-                    "valid_from_utc": (vp.get("fromDate") if vp else None),
-                    "valid_to_utc": (vp.get("toDate") if vp else None),
-                    "isNow": (vp.get("isNow") if vp else None),
-                })
-    return rows
 
 
 def main() -> None:
@@ -76,31 +45,81 @@ def main() -> None:
         raise RuntimeError("Missing environment variable TFL_API_KEY")
 
     headers = {"Ocp-Apim-Subscription-Key": api_key}
+    session = make_session()
 
     snapshot_dt = datetime.now(timezone.utc)
     snapshot_utc = snapshot_dt.isoformat()
 
-    raw_lines = get_lines_by_modes(headers, MODES)
-    line_ids = [l["id"] for l in raw_lines if "id" in l]
+    raw_lines = get_lines_by_modes(session, headers, MODES)
+    line_dim = [
+        {"line_id": l.get("id"), "line_name": l.get("name"), "mode_name": l.get("modeName")}
+        for l in raw_lines
+        if l.get("id")
+    ]
 
-    status_payloads: List[Dict[str, Any]] = []
-    for batch_ids in chunk(line_ids, BATCH_SIZE):
-        status_payloads.extend(get_status_for_line_ids(headers, batch_ids))
+    arrival_rows: List[Dict[str, Any]] = []
 
-    rows = flatten_statuses(status_payloads, snapshot_utc)
+    for l in line_dim:
+        line_id = l["line_id"]
+        try:
+            arrivals = get_arrivals_for_line(session, headers, line_id)
+        except Exception as e:
+            print(f"Arrivals failed for line {line_id}: {e}")
+            continue
 
-    df = pd.DataFrame(rows)
-    df["snapshot_utc"] = pd.to_datetime(df["snapshot_utc"], utc=True)
-    df["valid_from_utc"] = pd.to_datetime(df["valid_from_utc"], utc=True, errors="coerce")
-    df["valid_to_utc"] = pd.to_datetime(df["valid_to_utc"], utc=True, errors="coerce")
+        # small jitter to reduce burstiness
+        time.sleep(0.25 + random.random() * 0.25)
+
+        for a in arrivals:
+            arrival_rows.append({
+                "snapshot_utc": snapshot_utc,
+                "line_id": l["line_id"],
+                "line_name": l["line_name"],
+                "mode_name": l["mode_name"],
+                "stop_point_id": a.get("naptanId"),
+                "station_name": a.get("stationName"),
+                "platform_name": a.get("platformName"),
+                "direction": a.get("direction"),
+                "destination_name": a.get("destinationName"),
+                "expected_arrival": a.get("expectedArrival"),
+                "time_to_station_sec": a.get("timeToStation"),
+                "vehicle_id": a.get("vehicleId"),
+            })
+
+    df = pd.DataFrame(arrival_rows)
+
+    # Defensive typing + dedupe (API can occasionally repeat rows)
+    if not df.empty:
+        df["snapshot_utc"] = pd.to_datetime(df["snapshot_utc"], utc=True)
+        df["expected_arrival"] = pd.to_datetime(df["expected_arrival"], utc=True, errors="coerce")
+
+        df.drop_duplicates(
+            subset=[
+                "snapshot_utc",
+                "line_id",
+                "stop_point_id",
+                "platform_name",
+                "direction",
+                "expected_arrival",
+                "vehicle_id",
+            ],
+            inplace=True
+        )
+
+        df.sort_values(
+            by=["line_id", "station_name", "direction", "expected_arrival"],
+            inplace=True,
+            na_position="last"
+        )
+
+        df.reset_index(drop=True, inplace=True)
 
     # Flat output path (no subfolders)
-    out_dir = os.path.join("data", "snapshots")
+    out_dir = os.path.join("data", "arrivals")
     os.makedirs(out_dir, exist_ok=True)
 
-    # One file per run
     file_stamp = snapshot_dt.strftime("%Y-%m-%d_%H%M%S")
-    out_path = os.path.join(out_dir, f"tfl_status_{file_stamp}Z.parquet")
+    out_path = os.path.join(out_dir, f"tfl_arrivals_{file_stamp}Z.parquet")
 
     df.to_parquet(out_path, index=False)
     print(f"Wrote {len(df)} rows to {out_path}")
