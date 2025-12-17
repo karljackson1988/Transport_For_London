@@ -89,14 +89,13 @@ def main() -> None:
     df["valid_from_utc"] = pd.to_datetime(df["valid_from_utc"], utc=True, errors="coerce")
     df["valid_to_utc"] = pd.to_datetime(df["valid_to_utc"], utc=True, errors="coerce")
 
-    # Partitioned output path (daily folder)
-    day_folder = snapshot_dt.strftime("%Y-%m-%d")
-    out_dir = os.path.join("data", "snapshots", f"dt={day_folder}")
-    os.makedirs(out_dir, exist_ok=True)
+    # Single output folder
+out_dir = os.path.join("data", "snapshots")
+os.makedirs(out_dir, exist_ok=True)
 
-    # One file per run (simple + append-only)
-    file_stamp = snapshot_dt.strftime("%H%M%S")
-    out_path = os.path.join(out_dir, f"tfl_status_{day_folder}_{file_stamp}Z.parquet")
+# Filename format: YYYY-MM-DD-HHMMSS.parquet
+file_name = snapshot_dt.strftime("%Y-%m-%d-%H%M%S") + ".parquet"
+out_path = os.path.join(out_dir, file_name)
 
     df.to_parquet(out_path, index=False)
     print(f"Wrote {len(df)} rows to {out_path}")
