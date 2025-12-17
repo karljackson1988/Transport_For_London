@@ -12,6 +12,7 @@ BASE_URL = "https://api.tfl.gov.uk"
 MODES = "tube,dlr,overground,elizabeth-line,tram"
 TIMEOUT_SECS = 30
 
+
 def make_session() -> requests.Session:
     s = requests.Session()
     retry = Retry(
@@ -23,17 +24,20 @@ def make_session() -> requests.Session:
     s.mount("https://", HTTPAdapter(max_retries=retry))
     return s
 
+
 def get_lines_by_modes(session: requests.Session, headers: Dict[str, str], modes: str) -> List[Dict[str, Any]]:
     url = f"{BASE_URL}/Line/Mode/{modes}"
     r = session.get(url, headers=headers, timeout=TIMEOUT_SECS)
     r.raise_for_status()
     return r.json()
 
+
 def get_arrivals_for_line(session: requests.Session, headers: Dict[str, str], line_id: str) -> List[Dict[str, Any]]:
     url = f"{BASE_URL}/Line/{line_id}/Arrivals"
     r = session.get(url, headers=headers, timeout=TIMEOUT_SECS)
     r.raise_for_status()
     return r.json()
+
 
 def main() -> None:
     api_key = os.environ.get("TFL_API_KEY")
@@ -110,16 +114,16 @@ def main() -> None:
 
         df.reset_index(drop=True, inplace=True)
 
-    # Partitioned output path (daily folder)
-    day_folder = snapshot_dt.strftime("%Y-%m-%d")
-    out_dir = os.path.join("data", "arrivals", f"dt={day_folder}")
+    # Flat output path (no subfolders)
+    out_dir = os.path.join("data", "arrivals")
     os.makedirs(out_dir, exist_ok=True)
 
-    file_stamp = snapshot_dt.strftime("%H%M%S")
-    out_path = os.path.join(out_dir, f"tfl_arrivals_{day_folder}_{file_stamp}Z.parquet")
+    file_stamp = snapshot_dt.strftime("%Y-%m-%d_%H%M%S")
+    out_path = os.path.join(out_dir, f"tfl_arrivals_{file_stamp}Z.parquet")
 
     df.to_parquet(out_path, index=False)
     print(f"Wrote {len(df)} rows to {out_path}")
+
 
 if __name__ == "__main__":
     main()
