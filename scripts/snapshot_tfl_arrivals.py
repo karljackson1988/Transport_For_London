@@ -110,13 +110,14 @@ def main() -> None:
 
         df.reset_index(drop=True, inplace=True)
 
-    # Single output folder
-out_dir = os.path.join("data", "arrivals")
+    # Partitioned output path (daily folder)
+day_folder = snapshot_dt.strftime("%Y-%m-%d")
+out_dir = os.path.join("data", "snapshots", f"dt={day_folder}")
 os.makedirs(out_dir, exist_ok=True)
 
-# Filename format: YYYY-MM-DD-HHMMSS.parquet
-file_name = snapshot_dt.strftime("%Y-%m-%d-%H%M%S") + ".parquet"
-out_path = os.path.join(out_dir, file_name)
+# One file per run (simple + append-only)
+file_stamp = snapshot_dt.strftime("%H%M%S")
+out_path = os.path.join(out_dir, f"tfl_status_{day_folder}_{file_stamp}Z.parquet")
  
 
     df.to_parquet(out_path, index=False)
