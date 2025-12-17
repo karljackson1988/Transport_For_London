@@ -9,8 +9,10 @@ MODES = "tube,dlr,overground,elizabeth-line,tram"
 TIMEOUT_SECS = 30
 BATCH_SIZE = 20  # avoids overly long URLs
 
+
 def chunk(lst: List[str], size: int) -> List[List[str]]:
     return [lst[i:i + size] for i in range(0, len(lst), size)]
+
 
 def get_lines_by_modes(headers: Dict[str, str], modes: str) -> List[Dict[str, Any]]:
     url = f"{BASE_URL}/Line/Mode/{modes}"
@@ -18,12 +20,14 @@ def get_lines_by_modes(headers: Dict[str, str], modes: str) -> List[Dict[str, An
     r.raise_for_status()
     return r.json()
 
+
 def get_status_for_line_ids(headers: Dict[str, str], line_ids: List[str]) -> List[Dict[str, Any]]:
     ids_csv = ",".join(line_ids)
     url = f"{BASE_URL}/Line/{ids_csv}/Status"
     r = requests.get(url, headers=headers, timeout=TIMEOUT_SECS)
     r.raise_for_status()
     return r.json()
+
 
 def flatten_statuses(status_payload: List[Dict[str, Any]], snapshot_time: str) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
@@ -65,6 +69,7 @@ def flatten_statuses(status_payload: List[Dict[str, Any]], snapshot_time: str) -
                 })
     return rows
 
+
 def main() -> None:
     api_key = os.environ.get("TFL_API_KEY")
     if not api_key:
@@ -89,17 +94,17 @@ def main() -> None:
     df["valid_from_utc"] = pd.to_datetime(df["valid_from_utc"], utc=True, errors="coerce")
     df["valid_to_utc"] = pd.to_datetime(df["valid_to_utc"], utc=True, errors="coerce")
 
-    # Partitioned output path (daily folder)
-    day_folder = snapshot_dt.strftime("%Y-%m-%d")
-    out_dir = os.path.join("data", "snapshots", f"dt={day_folder}")
+    # Flat output path (no subfolders)
+    out_dir = os.path.join("data", "snapshots")
     os.makedirs(out_dir, exist_ok=True)
 
-    # One file per run (simple + append-only)
-    file_stamp = snapshot_dt.strftime("%H%M%S")
-    out_path = os.path.join(out_dir, f"tfl_status_{day_folder}_{file_stamp}Z.parquet")
+    # One file per run
+    file_stamp = snapshot_dt.strftime("%Y-%m-%d_%H%M%S")
+    out_path = os.path.join(out_dir, f"tfl_status_{file_stamp}Z.parquet")
 
     df.to_parquet(out_path, index=False)
     print(f"Wrote {len(df)} rows to {out_path}")
+
 
 if __name__ == "__main__":
     main()
