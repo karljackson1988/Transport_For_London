@@ -19,24 +19,20 @@ This mirrors real-world transport analytics and operations monitoring patterns.
 # Architecture Summary
 
 TfL Unified API
-      │
-      ▼
+      →
 GitHub Actions (ETL, Python)
-      │
-      ▼
+      →
 Parquet snapshots in GitHub
-      │
-      ▼
+      →
 Power BI Dataflows
-      │
-      ▼
+      →
 Power BI Reports (Live + Historical)
 
 
 # Stage 1 – ETL via GitHub Actions
 # Why GitHub Actions?
 
-Fully serverless
+Fully serverless for POC
 
 Deterministic scheduling
 
@@ -239,3 +235,9 @@ operational analytics modelling,
 and decision-focused visual design.
 
 It prioritises clarity, robustness, and insight over raw data volume.
+
+# Review changes / Enhancements
+
+There are too many .parquet files being loaded into GitHub and eventually being loaded into PowerBi on a very regulr reglar refresh schedule to show close to real time metrics.
+
+Moving forwards it would be better to append hstoric data into a single or even daily file and have the latest snapshot as it's own file using direct query to provide those close to real time analytics.
