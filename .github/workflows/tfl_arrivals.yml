@@ -2,7 +2,7 @@ name: TfL Arrivals Snapshot (15 min offset)
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
